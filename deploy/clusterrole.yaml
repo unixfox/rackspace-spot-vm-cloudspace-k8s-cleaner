@@ -1,0 +1,10 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: spot-vm-cleaner
+rules:
+  # The cleaner needs to list/watch spot-managed nodes (filtered by label) and
+  # delete node objects whose backing Spot VM is gone.
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch", "delete"]

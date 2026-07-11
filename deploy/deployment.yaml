@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spot-vm-cleaner
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: spot-vm-cleaner
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: spot-vm-cleaner
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: spot-vm-cleaner
+    spec:
+      serviceAccountName: spot-vm-cleaner
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cleaner
+          # Replace with your built image, e.g. ghcr.io/yourorg/spot-vm-cleaner:v0.1.0
+          image: spot-vm-cleaner:latest
+          imagePullPolicy: IfNotPresent
+          args: []
+          env:
+            - name: SPOT_ORG
+              value: "REPLACE_ME_WITH_YOUR_SPOT_ORG"
+            - name: SPOT_REFRESH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: spot-vm-cleaner
+                  key: SPOT_REFRESH_TOKEN
+            # Label on k3s nodes that marks them as Rackspace Spot VMs and
+            # carries the VM pool name as its value. Must match your
+            # cloud-init.
+            - name: SPOT_VM_POOL_LABEL
+              value: "rackspace-spot/vm-pool-name"
+            # How to match a k3s node to a Spot VM: "name" (node.Name ==
+            # Spot VM server name) or "ip" (InternalIP == VM IP).
+            - name: MATCH_BY
+              value: "name"
+            # Reconcile cadence.
+            - name: CLEAN_INTERVAL
+              value: "60s"
+            # Consecutive "VM gone AND NotReady" ticks before deleting a node.
+            - name: GRACE_TICKS
+              value: "2"
+            # Start in dry-run mode for a safe first rollout; flip to "false"
+            # once logs confirm the right nodes would be deleted.
+            - name: DRY_RUN
+              value: "false"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
