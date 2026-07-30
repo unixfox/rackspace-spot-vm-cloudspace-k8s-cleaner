@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/kelseyhightower/envconfig v1.4.0
-	github.com/rackspace-spot/spot-go-sdk v0.2.0
+	github.com/rackspace-spot/spot-go-sdk v0.2.1
 	k8s.io/api v0.36.3
 	k8s.io/apimachinery v0.36.3
 	k8s.io/client-go v0.36.3
