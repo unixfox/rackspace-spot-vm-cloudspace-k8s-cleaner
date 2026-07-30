@@ -2,12 +2,16 @@ package cleaner
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 
 	k8sclient "github.com/edevos/rackspace-spot-vm-cloudspace-k8s-cleaner/internal/k8s"
 	"github.com/edevos/rackspace-spot-vm-cloudspace-k8s-cleaner/internal/spot"
@@ -185,7 +189,7 @@ func TestDryRunDoesNotDelete(t *testing.T) {
 	}
 }
 
-func TestSpotAPIErrorSkipsTick(t *testing.T) {
+func TestSpotAPIErrorIsReturned(t *testing.T) {
 	spotC := &spot.Client{
 		Spot:    fakeSpot{err: errBoom},
 		Org:     "org",
@@ -307,6 +311,35 @@ func TestUnlabeledNodeIgnored(t *testing.T) {
 	}
 	if _, err := cs.CoreV1().Nodes().Get(context.Background(), "plain-node", metav1.GetOptions{}); err != nil {
 		t.Fatalf("plain node must still exist: %v", err)
+	}
+}
+
+func TestDeletePermissionDeniedIsFatal(t *testing.T) {
+	// RBAC rejects the delete: Reconcile must surface the error (main exits)
+	// instead of counting it and carrying on.
+	spotC := &spot.Client{
+		Spot:    fakeSpot{list: aliveList()}, // VM gone
+		Org:     "org",
+		MatchBy: "name",
+	}
+	cln, cs := newCleaner(spotC, node("node-1", "pool-a", false, ""), 1, false)
+	cs.PrependReactor("delete", "nodes", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(
+			corev1.Resource("nodes"), "node-1", errBoom)
+	})
+
+	res, err := cln.Reconcile(context.Background(), time.Now())
+	if err == nil {
+		t.Fatalf("expected error when delete is forbidden, got nil")
+	}
+	if !apierrors.IsForbidden(errors.Unwrap(errors.Unwrap(err))) {
+		t.Fatalf("expected a wrapped Forbidden error, got %v", err)
+	}
+	if res.Deleted != 0 {
+		t.Fatalf("expected 0 deletes, got %d", res.Deleted)
+	}
+	if _, err := cs.CoreV1().Nodes().Get(context.Background(), "node-1", metav1.GetOptions{}); err != nil {
+		t.Fatalf("node must still exist after a forbidden delete: %v", err)
 	}
 }
 

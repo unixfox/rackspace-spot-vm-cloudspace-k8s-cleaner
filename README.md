@@ -24,8 +24,11 @@ Every `CLEAN_INTERVAL` (default `60s`), the cleaner:
 4. A candidate is only deleted after `GRACE_TICKS` (default `2`, ≈ 2 minutes)
    consecutive "gone + NotReady" observations, to survive transient Spot API
    hiccups or momentary VM-report lag.
-5. If a `ListVMCloudSpaces` call fails, the whole tick is skipped (no
-   deletions, grace counters untouched) to avoid wrongful deletes.
+5. **Any error is fatal.** A failed `ListVMCloudSpaces` call, a node `list`
+   rejected by RBAC ("permission denied"), or a failed node `DELETE` logs the
+   error and exits non-zero — no deletions happen on that tick, and the Pod's
+   `restartPolicy` handles the retry. The cleaner never keeps looping in a
+   degraded state where it might make wrong decisions on partial data.
 6. `DELETE` the node object only — no pod drain/eviction (the VM is already
    gone, so its pods are already lost; draining would just slow things down and
    could hang on PodDisruptionBudgets).
@@ -183,10 +186,15 @@ go test ./...
   `rackspace-spot/vm-pool-name` label with a value matching the VMPool name in
   Spot; confirm `MATCH_BY` matches how you set node names/IPs; run with
   `DRY_RUN=false` after seeing candidates in logs.
-- **Wrong nodes at risk**: if `ListVMCloudSpaces` returns empty on a transient
-  API error, the tick is skipped (no deletes). If you see repeated "reconcile
-  tick skipped due to error" logs, verify `SPOT_REFRESH_TOKEN`/`SPOT_ORG` and
-  Spot platform connectivity.
+- **CrashLoopBackOff**: expected on any persistent error, since the cleaner
+  fails fast rather than degrading. Read the last `reconcile failed` log line:
+  `nodes is forbidden` means the ClusterRole/ClusterRoleBinding in `deploy/` is
+  missing or not bound to the ServiceAccount; a `spot: list VM cloudspaces`
+  error means `SPOT_REFRESH_TOKEN`/`SPOT_ORG` or Spot connectivity is wrong.
+- **Transient Spot API errors also crash**: they take the process down before
+  any delete, so no wrongful deletions can result. `GRACE_TICKS` still applies
+  across restarts only in the sense that counters reset — a restarted cleaner
+  starts every candidate's grace period over, which is the safe direction.
 
 [spot-vm-docs]: https://spot.rackspace.com/docs/en/virtual-machines
 [sdk]: https://github.com/rackspace-spot/spot-go-sdk

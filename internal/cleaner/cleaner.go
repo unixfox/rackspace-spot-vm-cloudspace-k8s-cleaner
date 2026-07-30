@@ -5,6 +5,7 @@ package cleaner
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -30,7 +31,6 @@ type Result struct {
 	ManagedNodes int
 	Deleted      int
 	Evaluated    int // nodes that were gone+NotReady this tick
-	Errors       int
 }
 
 // New constructs a Cleaner.
@@ -44,16 +44,15 @@ func New(s *spot.Client, k *k8s.Client, graceTicks int, dryRun bool) *Cleaner {
 	}
 }
 
-// Reconcile performs one tick. It never returns an error that should abort the
-// loop; per-node delete errors are counted and logged. Tick-level Spot API
-// errors are returned so the caller can skip without mutating stale counters.
+// Reconcile performs one tick. Any error — Spot API failure, node listing
+// failure, or a node delete rejected by the API server (e.g. RBAC "permission
+// denied") — is returned immediately and is fatal to the caller: a cleaner
+// that cannot see or act on the cluster must not keep running silently.
 func (c *Cleaner) Reconcile(ctx context.Context, now time.Time) (Result, error) {
 	res := Result{}
 
 	alive, err := c.Spot.AliveVMsByPool(ctx)
 	if err != nil {
-		// Spot API hiccup: skip the tick entirely to avoid false deletes
-		// and to keep grace counters stable.
 		return res, err
 	}
 
@@ -103,10 +102,7 @@ func (c *Cleaner) Reconcile(ctx context.Context, now time.Time) (Result, error) 
 		}
 
 		if err := c.K8s.DeleteNode(ctx, n.Name); err != nil {
-			slog.Error("failed to delete node",
-				"node", n.Name, "err", err.Error())
-			res.Errors++
-			continue
+			return res, fmt.Errorf("delete node %q (pool %q): %w", n.Name, n.Pool, err)
 		}
 		res.Deleted++
 		delete(c.stale, n.Name)

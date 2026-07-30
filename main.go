@@ -71,18 +71,26 @@ func main() {
 	defer tick.Stop()
 
 	// Run one reconcile immediately on startup, then on each tick.
+	//
+	// Any reconcile error (Spot API failure, RBAC "permission denied" on nodes,
+	// a failed delete) is fatal: we exit non-zero and let the Pod restart
+	// policy handle it, rather than looping forever in a broken state.
 	run := func() {
 		start := time.Now()
 		res, err := cln.Reconcile(ctx, start)
 		if err != nil {
-			slog.Warn("reconcile tick skipped due to error", "err", err.Error(), "duration", time.Since(start).String())
-			return
+			if ctx.Err() != nil {
+				// Shutting down: the in-flight request was cancelled by SIGTERM.
+				slog.Info("reconcile aborted by shutdown", "err", err.Error())
+				return
+			}
+			slog.Error("reconcile failed", "err", err.Error(), "duration", time.Since(start).String())
+			os.Exit(1)
 		}
 		slog.Info("reconcile complete",
 			"managed_nodes", res.ManagedNodes,
 			"evaluated", res.Evaluated,
 			"deleted", res.Deleted,
-			"errors", res.Errors,
 			"dry_run", cfg.DryRun,
 			"duration", time.Since(start).String())
 	}
