@@ -7,7 +7,7 @@ require (
 	github.com/rackspace-spot/spot-go-sdk v0.2.1
 	k8s.io/api v0.36.4
 	k8s.io/apimachinery v0.36.4
-	k8s.io/client-go v0.36.3
+	k8s.io/client-go v0.36.4
 )
 
 require (
